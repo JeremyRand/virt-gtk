@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+# Copyright 2024 Jeremy Rand.
+#
+# This file is part of virt-gtk.
+#
+# virt-gtk is free software: you can redistribute it and/or
+# modify it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# virt-gtk is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with virt-gtk.  If not, see
+# <https://www.gnu.org/licenses/>.
+
+rm -rf ./launchers
+mkdir ./launchers
+
+for VM_NAME in $(virsh list --all --name)
+do
+	echo "${VM_NAME}"
+	echo "[Desktop Entry]
+Comment=
+Exec=sh -c 'pkexec env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY ${PWD}/virt-gtk ${VM_NAME}'
+Icon=qemu
+MimeType=
+Name=${VM_NAME}
+Path=${PWD}
+StartupNotify=true
+Terminal=false
+TerminalOptions=\s--noclose
+Type=Application
+X-KDE-SubstituteUID=false
+X-KDE-Username=
+" > "./launchers/${VM_NAME}.desktop"
+	chmod +x "./launchers/${VM_NAME}.desktop"
+done

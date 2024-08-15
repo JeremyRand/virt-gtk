@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+
+# Copyright 2024 Jeremy Rand.
+#
+# This file is part of virt-gtk.
+#
+# virt-gtk is free software: you can redistribute it and/or
+# modify it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# virt-gtk is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with virt-gtk.  If not, see
+# <https://www.gnu.org/licenses/>.
+
+# Networking note:
+# You need to edit /etc/qemu/bridge.conf and add lines like this:
+# allow virbr0
+# TODO: handle this automatically.
+
+set -u
+
+# VM name
+QEMU_DOMAIN="$1"
+shift
+
+# Get the initial QEMU command from libvirt
+QEMU_CMD="$(virsh domxml-to-native qemu-argv --domain "${QEMU_DOMAIN}")"
+
+# Remove env vars
+QEMU_CMD="$(echo "${QEMU_CMD}" | sed -E "s|.* /usr/bin/qemu|/usr/bin/qemu|g")"
+
+# Remove sandbox
+QEMU_CMD="$(echo "${QEMU_CMD}" | sed -E "s| -sandbox [^ ]+||g")"
+
+# Remove SPICE
+QEMU_CMD="$(echo "${QEMU_CMD}" | sed -E "s| -spice [^ ]+||g")"
+
+# Use SDL audio instead of SPICE
+# TODO: Should we use PulseAudio or something instead? SDL seems to be unrecommended by QEMU devs.
+QEMU_CMD="$(echo "${QEMU_CMD}" | sed -E 's| -audiodev [^ ]+| -audiodev {"id":"audio1","driver":"sdl"}|g')"
+
+# Expose serial console to GUI
+QEMU_CMD="$(echo "${QEMU_CMD}" | sed -E "s| -chardev pty,| -chardev vc,|g")"
+
+# Remove AES key
+QEMU_CMD="$(echo "${QEMU_CMD}" | sed -E 's|-object [^ ]+\.aes[^ ]+ ||g')"
+
+# Don't pause initially
+QEMU_CMD="$(echo "${QEMU_CMD}" | sed -E 's|-S ||g')"
+
+PREREQ_CMDS=()
+
+while true
+do
+	echo "${PREREQ_CMDS[*]}"
+	echo "${QEMU_CMD}"
+
+	# Remove single quotes.
+	# TODO: This may break something, need to find a better way of removing only the right ones.
+	QEMU_CMD="$(echo "${QEMU_CMD}" | sed -E "s|'||g")"
+
+	for ((PREREQ_CMD_IDX = 0; PREREQ_CMD_IDX < ${#PREREQ_CMDS[@]}; PREREQ_CMD_IDX++))
+	do
+		${PREREQ_CMDS[$PREREQ_CMD_IDX]} &
+	done
+	# TODO: Is there a safer/faster way to wait for the socket to be created than just sleeping?
+	sleep 1s
+
+	# Use x11 so that KeePassXC auto-type works.
+	# TODO: Find a better way that works with Wayland.
+	RESULT="$(GDK_BACKEND=x11 ${QEMU_CMD} 2>&1)"
+	#RESULT="$(${QEMU_CMD} 2>&1)"
+
+	if [[ "$?" != 0 ]]
+	then
+		echo FAILED
+		echo
+		echo "${RESULT}"
+
+		BAD_OPTION="$(echo ${RESULT} | grep -Eo 'qemu-system[^ ]+: -[^ ]+ [^ ]+: [^w]' | sed -E "s/qemu-system[^ ]+: //" | sed -E 's/: [^ ]$//')"
+		echo
+		echo "${BAD_OPTION}"
+		echo
+
+		if echo "${BAD_OPTION}" | grep -q 'netdev' && echo "${RESULT}" | grep -q 'Bad file descriptor'
+		then
+			NETWORK_NUM="$(echo "${BAD_OPTION}" | grep -oE 'hostnet[0-9]+' | grep -oE '[0-9]+')"
+			NETWORK_LINE="$(("${NETWORK_NUM}"+1))"
+			NETWORK_NAME="$(virsh domiflist "${QEMU_DOMAIN}" | grep network | head -n "${NETWORK_LINE}" | tail -n 1 | sed -E 's| +|\t|g' | cut -f 4)"
+			NETWORK_BRIDGE="$(virsh net-info "${NETWORK_NAME}" | grep -oE 'virbr[0-9]+')"
+
+			echo
+			echo "NETWORK LINE ${NETWORK_LINE}"
+			echo "NETWORK NAME ${NETWORK_NAME}"
+			echo "NETWORK BRIDGE ${NETWORK_BRIDGE}"
+			echo
+
+			# Replace tap/fd with bridge/br, remove vhost/vhostfd
+			# Thanks https://developers.redhat.com/blog/2020/03/06/configure-and-run-a-qemu-based-vm-outside-of-libvirt
+			GOOD_OPTION="$(echo "${BAD_OPTION}" | sed -E 's|\"type\":\"tap\"|\"type\":\"bridge\"|' | sed -E 's|\"fd\":\"[0-9]+\"|\"br\":\"'"${NETWORK_BRIDGE}"'\"|' | sed -E 's|,\"vhost\":true,\"vhostfd\":\"[0-9]+\"||')"
+			echo "${GOOD_OPTION}"
+			echo
+
+			QEMU_CMD="$(echo "${QEMU_CMD}" | sed "s|${BAD_OPTION}|${GOOD_OPTION}|")"
+		elif echo "${BAD_OPTION}" | grep -q 'fs.sock' && echo "${RESULT}" | grep -q 'No such file or directory'
+		then
+			FS_NUM="$(echo "${BAD_OPTION}" | grep -oE '/fs[0-9]+-fs.sock' | grep -oE '[0-9]+')"
+			FS_LINE="$(("${FS_NUM}"+1))"
+			FS_PATH="$(virsh dumpxml "${QEMU_DOMAIN}" | tr -d '\n' | grep -oE "<driver type='virtiofs'[^>]*/> *<source dir='[^']+'/>" | head -n "${FS_LINE}" | tail -n 1 | grep -oE "dir='[^']+'" | grep -oE "'[^']+'" | grep -oE "[^']+")"
+
+			echo
+			echo "FS LINE ${FS_LINE}"
+			echo "FS PATH ${FS_PATH}"
+			echo
+
+			FS_SOCKET_DIR="$(mktemp -d)"
+			# TODO: The path to virtiofsd seems to vary by distro.
+			PREREQ_CMDS+=("/usr/lib/qemu/virtiofsd --socket-path="${FS_SOCKET_DIR}/fs${FS_NUM}-fs.sock" -o source="${FS_PATH}" -o cache=always")
+
+			GOOD_OPTION="$(echo "${BAD_OPTION}" | sed -E "s|path=[^ ]+.sock|path=${FS_SOCKET_DIR}/fs${FS_NUM}-fs.sock|")"
+			echo "${GOOD_OPTION}"
+			echo
+
+			QEMU_CMD="$(echo "${QEMU_CMD}" | sed "s|${BAD_OPTION}|${GOOD_OPTION}|")"
+		else
+			QEMU_CMD="$(echo "${QEMU_CMD}" | sed "s|${BAD_OPTION}||")"
+		fi
+	else
+		echo SUCCESS
+		echo
+		echo "${RESULT}"
+
+		break
+	fi
+done
