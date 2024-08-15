@@ -22,7 +22,7 @@ On the other hand, if virt-manager's security comes at the cost of making VM's s
 First, run the following:
 
 ```
-./virt-gtk-update
+sudo ./virt-gtk-update
 ```
 
 This will create a launcher for each VM that you currently have. You'll need to redo this whenever you create, delete, or rename a VM.
