@@ -16,7 +16,6 @@ And that's where virt-gtk comes in. With virt-gtk, you can run an existing VM (c
 virt-gtk runs QEMU with less sandboxing than virt-manager:
 
 * virt-gtk gives QEMU access to X11.
-* virt-gtk gives QEMU the `cap_net_admin` capability.
 * virt-gtk runs QEMU under the `audio` and `netdev` groups.
 * virt-gtk disables QEMU's seccomp sandboxing.
 
