@@ -13,7 +13,14 @@ And that's where virt-gtk comes in. With virt-gtk, you can run an existing VM (c
 
 ## But what's the catch?
 
-virt-gtk runs QEMU as root, and without sandboxing. This means that it has less security against malicious VM's than virt-manager does. I am admittedly unhappy about this, and I would be excited to receive community contributions that fix this.
+virt-gtk runs QEMU with less sandboxing than virt-manager:
+
+* virt-gtk gives QEMU access to X11.
+* virt-gtk gives QEMU the `cap_net_admin` capability.
+* virt-gtk runs QEMU under the `audio` and `netdev` groups.
+* virt-gtk disables QEMU's seccomp sandboxing.
+
+This means that virt-gtk has less security against malicious VM's than virt-manager does. I am admittedly unhappy about this, and I would be excited to receive community contributions that fix this.
 
 On the other hand, if virt-manager's security comes at the cost of making VM's so painful to use that you wind up doing some things without VM's at all, then virt-gtk is probably better security for you. Unusable security isn't real security.
 

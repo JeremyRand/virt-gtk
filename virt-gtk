@@ -23,6 +23,14 @@
 # allow virbr0
 # TODO: handle this automatically.
 
+# Permissions note:
+# You need to add the "libvirt-qemu" user to "audio" and "netdev" groups if you
+# want audio and networking to work, as below. This will mildly weaken the
+# sandboxing of virt-manager too. If you don't want to do that, you can change
+# QEMU_USER to root below instead.
+# sudo adduser libvirt-qemu audio
+# sudo adduser libvirt-qemu netdev
+
 set -u
 
 # VM name
@@ -31,6 +39,8 @@ shift
 
 # Get the initial QEMU command from libvirt
 QEMU_CMD="$(virsh domxml-to-native qemu-argv --domain "${QEMU_DOMAIN}")"
+
+echo "${QEMU_CMD}"
 
 # Remove env vars
 QEMU_CMD="$(echo "${QEMU_CMD}" | sed -E "s|.* /usr/bin/qemu|/usr/bin/qemu|g")"
@@ -55,26 +65,49 @@ QEMU_CMD="$(echo "${QEMU_CMD}" | sed -E 's|-object [^ ]+\.aes[^ ]+ ||g')"
 QEMU_CMD="$(echo "${QEMU_CMD}" | sed -E 's|-S ||g')"
 
 PREREQ_CMDS=()
+PREREQ_CMDS_2=()
+
+QEMU_USER=libvirt-qemu
+
+# Workaround "Authorization required, but no authorization protocol specified" from x11
+# TODO: use Wayland instead.
+QEMU_X_DIR="$(mktemp -d)"
+cp "${XAUTHORITY}" "${QEMU_X_DIR}/xauth"
+chown "${QEMU_USER}:${QEMU_USER}" "${QEMU_X_DIR}"
+chown "${QEMU_USER}:${QEMU_USER}" "${QEMU_X_DIR}/xauth"
 
 while true
 do
 	echo "${PREREQ_CMDS[*]}"
+	echo "${PREREQ_CMDS_2[*]}"
 	echo "${QEMU_CMD}"
 
 	# Remove single quotes.
 	# TODO: This may break something, need to find a better way of removing only the right ones.
 	QEMU_CMD="$(echo "${QEMU_CMD}" | sed -E "s|'||g")"
 
+	# Run virtiofsd
 	for ((PREREQ_CMD_IDX = 0; PREREQ_CMD_IDX < ${#PREREQ_CMDS[@]}; PREREQ_CMD_IDX++))
 	do
-		${PREREQ_CMDS[$PREREQ_CMD_IDX]} &
+		${PREREQ_CMDS[${PREREQ_CMD_IDX}]} &
 	done
 	# TODO: Is there a safer/faster way to wait for the socket to be created than just sleeping?
 	sleep 1s
 
+	# Run chown for virtiofsd sockets
+	for ((PREREQ_CMD_IDX = 0; PREREQ_CMD_IDX < ${#PREREQ_CMDS_2[@]}; PREREQ_CMD_IDX++))
+	do
+		${PREREQ_CMDS_2[${PREREQ_CMD_IDX}]} &
+	done
+
 	# Use x11 so that KeePassXC auto-type works.
 	# TODO: Find a better way that works with Wayland.
-	RESULT="$(GDK_BACKEND=x11 ${QEMU_CMD} 2>&1)"
+	# Use cap_net_admin to avoid tun device creation errors.
+	# TODO: Find a better way without running all of QEMU with that cap.
+	RESULT="$(capsh --caps="cap_net_admin+eip cap_setpcap,cap_setuid,cap_setgid+ep" --keep=1 --user=${QEMU_USER} --addamb="cap_net_admin" -- -c "QEMU_CMD='${QEMU_CMD}' ; XAUTHORITY=${QEMU_X_DIR}/xauth GDK_BACKEND=x11 \${QEMU_CMD}" 2>&1)"
+	#RESULT="$(sudo -u ${QEMU_USER} XAUTHORITY="${QEMU_X_DIR}/xauth" GDK_BACKEND=x11 ${QEMU_CMD} 2>&1)"
+	#RESULT="$(sudo -u ${QEMU_USER} GDK_BACKEND=x11 ${QEMU_CMD} 2>&1)"
+	#RESULT="$(sudo -u ${QEMU_USER} ${QEMU_CMD} 2>&1)"
 	#RESULT="$(${QEMU_CMD} 2>&1)"
 
 	if [[ "$?" != 0 ]]
@@ -122,6 +155,8 @@ do
 			FS_SOCKET_DIR="$(mktemp -d)"
 			# TODO: The path to virtiofsd seems to vary by distro.
 			PREREQ_CMDS+=("/usr/lib/qemu/virtiofsd --socket-path="${FS_SOCKET_DIR}/fs${FS_NUM}-fs.sock" -o source="${FS_PATH}" -o cache=always")
+			PREREQ_CMDS_2+=("chown ${QEMU_USER}:${QEMU_USER} ${FS_SOCKET_DIR}")
+			PREREQ_CMDS_2+=("chown ${QEMU_USER}:${QEMU_USER} ${FS_SOCKET_DIR}/fs${FS_NUM}-fs.sock")
 
 			GOOD_OPTION="$(echo "${BAD_OPTION}" | sed -E "s|path=[^ ]+.sock|path=${FS_SOCKET_DIR}/fs${FS_NUM}-fs.sock|")"
 			echo "${GOOD_OPTION}"
