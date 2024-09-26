@@ -26,7 +26,7 @@ do
 	echo "${VM_NAME}"
 	echo "[Desktop Entry]
 Comment=
-Exec=sh -c 'pkexec env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY ${PWD}/virt-gtk ${VM_NAME}'
+Exec=sh -c \"pkexec env DISPLAY=\\\\\$DISPLAY XAUTHORITY=\\\\\$XAUTHORITY ${PWD}/virt-gtk ${VM_NAME}\"
 Icon=qemu
 MimeType=
 Name=${VM_NAME}
