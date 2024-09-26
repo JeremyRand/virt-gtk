@@ -9,7 +9,7 @@ virt-manager is a reasonably nice GUI for *creating* VM's. However, for actually
 
 Much of this shittiness seems to be due to Red Hat engineers smoking crack and deciding that "let's pipe the entire VM's framebuffer through a SPICE Unix socket instead of just using shared memory" was a good idea. (I've been told that there were probably other drugs and corresponding bad decisions involved in the shittiness too.)
 
-And that's where virt-gtk comes in. With virt-gtk, you can run an existing VM (created in virt-manager) using standard QEMU with the standard GTK GUI (no SPICE). It's much less laggy than virt-manager, audio works fine, and you can search for VM's with whatever search functionality your file manager (e.g. Dolphin) has.
+And that's where virt-gtk comes in. With virt-gtk, you can run an existing VM (created in virt-manager) using standard QEMU with the standard GTK GUI (no SPICE). It's much less laggy than virt-manager, audio works fine, and VM's show up in your desktop launcher where you can easily search for them.
 
 ## But what's the catch?
 
@@ -31,9 +31,9 @@ First, run the following:
 sudo ./virt-gtk-update
 ```
 
-This will create a launcher for each VM that you currently have. You'll need to redo this whenever you create, delete, or rename a VM.
+This will create an application in your desktop launcher for each VM that you currently have. You'll need to redo this whenever you create, delete, or rename a VM.
 
-Then, to run a VM, go to the `launchers` folder that was created, and run the `.desktop` file corresponding to the VM you want. If you have a lot of launchers and want to search by name substring, just use your file manager (e.g. Dolphin) for that.
+To run a VM, just choose it in your desktop launcher (it'll be in the `System` category). You can search for VM's in your desktop launcher just like you would search for other applications.
 
 What, were you hoping it would be more complicated than that?
 
