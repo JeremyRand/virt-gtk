@@ -18,6 +18,9 @@
 # along with virt-gtk.  If not, see
 # <https://www.gnu.org/licenses/>.
 
+rm -rf /usr/local/share/applications/virt-gtk
+mkdir /usr/local/share/applications/virt-gtk
+
 rm -rf ./launchers
 mkdir ./launchers
 
@@ -40,4 +43,6 @@ X-KDE-SubstituteUID=false
 X-KDE-Username=
 " > "./launchers/${VM_NAME}.desktop"
 	chmod +x "./launchers/${VM_NAME}.desktop"
+
+	desktop-file-install --dir="/usr/local/share/applications/virt-gtk" "./launchers/${VM_NAME}.desktop"
 done
