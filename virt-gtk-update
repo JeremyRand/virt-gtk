@@ -21,6 +21,7 @@
 rm -rf /usr/local/share/applications/virt-gtk
 mkdir /usr/local/share/applications/virt-gtk
 
+# TODO: Use a temporary folder for this instead.
 rm -rf ./launchers
 mkdir ./launchers
 
