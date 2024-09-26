@@ -31,6 +31,7 @@ Icon=qemu
 MimeType=
 Name=${VM_NAME}
 Path=${PWD}
+Categories=System;
 StartupNotify=true
 Terminal=false
 TerminalOptions=\s--noclose
