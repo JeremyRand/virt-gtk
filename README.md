@@ -23,6 +23,10 @@ This means that virt-gtk has less security against malicious VM's than virt-mana
 
 On the other hand, if virt-manager's security comes at the cost of making VM's so painful to use that you wind up doing some things without VM's at all, then virt-gtk is probably better security for you. Unusable security isn't real security.
 
+## Prerequisites
+
+You need `desktop-file-utils` v0.27 or higher. For Debian, that means Trixie or higher.
+
 ## Instructions
 
 First, run the following:

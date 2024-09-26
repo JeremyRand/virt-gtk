@@ -29,6 +29,7 @@ for VM_NAME in $(virsh list --all --name)
 do
 	echo "${VM_NAME}"
 	echo "[Desktop Entry]
+Version=1.5
 Comment=
 Exec=sh -c \"pkexec env DISPLAY=\\\\\$DISPLAY XAUTHORITY=\\\\\$XAUTHORITY ${PWD}/virt-gtk ${VM_NAME}\"
 Icon=qemu
@@ -39,6 +40,7 @@ Categories=System;
 StartupNotify=true
 Terminal=false
 TerminalOptions=\s--noclose
+SingleMainWindow=true
 Type=Application
 X-KDE-SubstituteUID=false
 X-KDE-Username=
