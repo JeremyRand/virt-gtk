@@ -96,19 +96,21 @@ do
 	# Run virtiofsd
 	for ((PREREQ_CMD_IDX = 0; PREREQ_CMD_IDX < ${#PREREQ_CMDS[@]}; PREREQ_CMD_IDX++))
 	do
-		${PREREQ_CMDS[${PREREQ_CMD_IDX}]} &
+		# TODO: Avoid eval for security reasons.
+		eval "${PREREQ_CMDS[${PREREQ_CMD_IDX}]}" &
 	done
-	# TODO: Is there a safer/faster way to wait for the socket to be created than just sleeping?
-	sleep 1s
 
-	# Run chown for virtiofsd sockets
+	# Wait for virtiofsd sockets to listen; run chown for them
 	for ((PREREQ_CMD_IDX = 0; PREREQ_CMD_IDX < ${#PREREQ_CMDS_2[@]}; PREREQ_CMD_IDX++))
 	do
-		${PREREQ_CMDS_2[${PREREQ_CMD_IDX}]} &
+		# TODO: Avoid eval for security reasons.
+		eval "${PREREQ_CMDS_2[${PREREQ_CMD_IDX}]}"
 	done
 
+	# TODO: Avoid de facto eval on QEMU_CMD for security reasons.
 	# Use x11 so that KeePassXC auto-type works.
 	# TODO: Find a better way that works with Wayland.
+	# TODO: Try sandboxing QEMU (maybe pledge or bubblewrap?) so that it doesn't have full privs of QEMU_USER.
 	RESULT="$(sudo -u ${QEMU_USER} XAUTHORITY="${QEMU_X_DIR}/xauth" GDK_BACKEND=x11 ${QEMU_CMD} 2>&1)"
 	#RESULT="$(sudo -u ${QEMU_USER} GDK_BACKEND=x11 ${QEMU_CMD} 2>&1)"
 	#RESULT="$(sudo -u ${QEMU_USER} ${QEMU_CMD} 2>&1)"
@@ -158,7 +160,11 @@ do
 
 			FS_SOCKET_DIR="$(mktemp -d)"
 			# TODO: The path to virtiofsd seems to vary by distro.
-			PREREQ_CMDS+=("/usr/lib/qemu/virtiofsd --socket-path="${FS_SOCKET_DIR}/fs${FS_NUM}-fs.sock" -o source="${FS_PATH}" -o cache=always")
+			# TODO: Use --socket-group=${QEMU_USER} so that we can avoid chown later.
+			PREREQ_CMDS+=("/usr/lib/qemu/virtiofsd --socket-path="${FS_SOCKET_DIR}/fs${FS_NUM}-fs.sock" -o source="${FS_PATH}" -o cache=always 2> "${FS_SOCKET_DIR}/fs${FS_NUM}-fs.log)
+			# Wait for virtiofsd to log that it's ready
+			touch ${FS_SOCKET_DIR}/fs${FS_NUM}-fs.log
+			PREREQ_CMDS_2+=("tail -f ${FS_SOCKET_DIR}/fs${FS_NUM}-fs.log | grep -i --max-count=1 'waiting for'")
 			PREREQ_CMDS_2+=("chown ${QEMU_USER}:${QEMU_USER} ${FS_SOCKET_DIR}")
 			PREREQ_CMDS_2+=("chown ${QEMU_USER}:${QEMU_USER} ${FS_SOCKET_DIR}/fs${FS_NUM}-fs.sock")
 
