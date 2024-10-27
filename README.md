@@ -25,13 +25,15 @@ On the other hand, if virt-manager's security comes at the cost of making VM's s
 
 ## Instructions
 
-First, run the following:
+First, create your VM's in virt-manager, just like you would normally.
+
+Then, run the following:
 
 ```
 sudo ./virt-gtk-update
 ```
 
-This will create an application in your desktop launcher for each VM that you currently have. You'll need to redo this whenever you create, delete, or rename a VM.
+This will create an application in your desktop launcher for each VM that you currently have. You'll need to redo this step whenever you create, delete, or rename a VM.
 
 To run a VM, just choose it in your desktop launcher (it'll be in the `System` category). You can search for VM's in your desktop launcher just like you would search for other applications.
 
