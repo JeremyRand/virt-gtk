@@ -39,9 +39,21 @@ To run a VM, just choose it in your desktop launcher (it'll be in the `System` c
 
 What, were you hoping it would be more complicated than that?
 
+### Installing an OS
+
+If you would like to run the OS installer inside virt-gtk, do the following:
+
+1. Create the VM in virt-manager as normal, choosing the installation media image inside virt-manager.
+2. As soon as virt-manager launches the VM and the installer shows the GRUB boot menu, force-power-off the VM.
+3. Go to virt-manager settings, and re-select the installation media image for the CDROM device.
+4. Re-enable the CDROM device in the Boot Options list.
+5. Run `sudo virt-gtk-update`.
+6. Launch the VM in virt-gtk.
+7. Once the installer has finished, you can optionally remove the media image for the CDROM device, disable booting from CDROM, and/or remove the CDROM device completely.
+
 ## Credits
 
-Copyright (C) 2024 Jeremy Rand.
+Copyright (C) 2024-2025 Jeremy Rand.
 
 virt-gtk is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

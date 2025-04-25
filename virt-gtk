@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright 2024 Jeremy Rand.
+# Copyright 2024-2025 Jeremy Rand.
 #
 # This file is part of virt-gtk.
 #
@@ -37,6 +37,11 @@
 # Do not enable the setuid attribute on that helper like the QEMU docs say
 # here: https://wiki.qemu.org/Features/HelperNetworking#Setup
 # setcap works fine and has less attack surface.
+#
+# If your VM's are launching without the disk image attached, this may be
+# because libvirt is creating the disk images such that they're owned by root.
+# You can fix this via:
+# sudo chown libvirt-qemu:libvirt-qemu /var/lib/libvirt/images/*.qcow2
 
 set -u
 
@@ -91,6 +96,7 @@ do
 
 	# Remove single quotes.
 	# TODO: This may break something, need to find a better way of removing only the right ones.
+	# TODO: virt-gtk doesn't work with CD images whose path has a space; quote handling might be the cause?
 	QEMU_CMD="$(echo "${QEMU_CMD}" | sed -E "s|'||g")"
 
 	# Run virtiofsd
