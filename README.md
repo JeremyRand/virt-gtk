@@ -53,7 +53,7 @@ If you would like to run the OS installer inside virt-gtk, do the following:
 
 ## Credits
 
-Copyright (C) 2024-2025 Jeremy Rand.
+Copyright (C) 2024-2026 Jeremy Rand.
 
 virt-gtk is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
