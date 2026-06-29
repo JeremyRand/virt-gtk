@@ -4,10 +4,11 @@ virt-manager is a reasonably nice GUI for *creating* VM's. However, for actually
 
 * Lots of input and video lag.
 * Even worse lag when running cross-endian, e.g. a ppc64 guest on a ppc64le host.
-* No audio.
+* Even worse lag when many VM's are running simultaneously.
+* ~~No audio.~~ This seems to have eventually been fixed.
 * No searching for VM's by name substring.
 
-Much of this shittiness seems to be due to Red Hat engineers smoking crack and deciding that "let's pipe the entire VM's framebuffer through a SPICE Unix socket instead of just using shared memory" was a good idea. (I've been told that there were probably other drugs and corresponding bad decisions involved in the shittiness too.)
+Much of this shittiness seems to be due to Red Hat engineers smoking crack and deciding that "let's pipe the entire VM's framebuffer through a SPICE Unix socket instead of just using shared memory" was a good idea. Additional shittiness seems to be due to Red Hat engineers smoking LSD and deciding that "let's run all VM's on the same thread, so all your active VM's will hang for a couple seconds when one VM is booting" was a good idea. Things don't look good on the horizon, due to Red Hat engineers smoking krokodil and deciding "the real problem with virt-manager is that it's not laggy enough, let's rewrite the whole thing to run inside a web browser." (I've been told that there were probably other drugs and corresponding bad decisions involved in the shittiness too.)
 
 And that's where virt-gtk comes in. With virt-gtk, you can run an existing VM (created in virt-manager) using standard QEMU with the standard GTK GUI (no SPICE). It's much less laggy than virt-manager, audio works fine, and VM's show up in your desktop launcher where you can easily search for them.
 
@@ -15,13 +16,48 @@ And that's where virt-gtk comes in. With virt-gtk, you can run an existing VM (c
 
 virt-gtk runs QEMU with less sandboxing than virt-manager:
 
-* virt-gtk gives QEMU access to X11.
 * virt-gtk runs QEMU under the `audio` and `netdev` groups.
+* virt-gtk grants QEMU access to the PulseAudio and Wayland sockets.
 * virt-gtk disables QEMU's seccomp sandboxing.
 
-This means that virt-gtk has less security against malicious VM's than virt-manager does. I am admittedly unhappy about this, and I would be excited to receive community contributions that fix this.
+This means that virt-gtk has less security against malicious VM's than virt-manager does. I am admittedly unhappy about this, and I would be excited to receive community contributions that improve sandboxing.
 
 On the other hand, if virt-manager's security comes at the cost of making VM's so painful to use that you wind up doing some things without VM's at all, then virt-gtk is probably better security for you. Unusable security isn't real security.
+
+## Installation
+
+```
+pushd cmd/virt-gtk
+go build
+sudo cp -a ./virt-gtk /usr/sbin/
+popd
+
+push cmd/virt-gtk-update
+go build
+sudo cp -a ./virt-gtk-update /usr/sbin/
+popd
+
+sudo adduser libvirt-qemu audio
+sudo adduser libvirt-qemu netdev
+
+# DO NOT enable the setuid attribute on qemu-bridge-helper like the QEMU docs say
+# here: https://wiki.qemu.org/Features/HelperNetworking#Setup
+# setcap works fine and has less attack surface.
+sudo setcap 'cap_net_admin+eip' /usr/lib/qemu/qemu-bridge-helper
+
+mkdir -p ~/.config/pipewire/pipewire-pulse.conf.d/
+nano ~/.config/pipewire/pipewire-pulse.conf.d/pulse-server.conf
+
+# Paste the following:
+pulse.properties = {
+    server.address = [
+        "unix:native"
+        "unix:/tmp/pulse-socket"
+    ]
+}
+
+systemctl --user restart pipewire
+```
 
 ## Instructions
 
@@ -30,7 +66,7 @@ First, create your VM's in virt-manager, just like you would normally.
 Then, run the following:
 
 ```
-sudo ./virt-gtk-update
+sudo virt-gtk-update
 ```
 
 This will create an application in your desktop launcher for each VM that you currently have. You'll need to redo this step whenever you create, delete, or rename a VM.

@@ -22,10 +22,12 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"flag"
 	"log"
 	"net/url"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -37,9 +39,21 @@ import (
 	"github.com/JeremyRand/virt-gtk/common"
 )
 
-// TODO: don't run as root
-// TODO: handle X11 and/or Wayland
 // TODO: find a way to make KeePassXC auto-type work with Wayland
+
+// TODO: to run under X11, you need to do this:
+// xhost +SI:localuser:root
+// Or a different user than root
+// To undo:
+// xhost -SI:localuser:root
+
+var (
+	displayServer = flag.String("display-server", "wayland", "x11 or wayland")
+	runAsRoot = flag.Bool("root", false, "run as root")
+	qemuUsername = flag.String("qemu-user", "libvirt-qemu", "user to run Qemu as (if not root)")
+	vmName = flag.String("vm", "", "name of VM to launch")
+	verbose = flag.Bool("verbose", false, "verbose output")
+)
 
 func fsPaths(xmlDesc string) []string {
 	type Driver struct {
@@ -84,11 +98,30 @@ func runHelperCmd(cmd *exec.Cmd) {
 
 	err := cmd.Run()
 	if err != nil {
-		log.Fatalf("failed to run virtiofsd: %v, %s", err, out.String())
+		log.Fatalf("failed to run helper process: %v, %s", err, out.String())
+	}
+}
+
+func killHelperCmd(cmd *exec.Cmd) {
+	var out strings.Builder
+	cmd.Stderr = &out
+
+	err := cmd.Process.Kill()
+	if err != nil {
+		log.Fatalf("failed to kill helper process: %v, %s", err, out.String())
 	}
 }
 
 func main() {
+	flag.Parse()
+
+	if *displayServer != "x11" && *displayServer != "wayland" {
+		log.Fatalf("-display-server arg must be x11 or wayland")
+	}
+	if *vmName == "" {
+		log.Fatalf("-vm arg is required")
+	}
+
 	uri, _ := url.Parse(string(libvirt.QEMUSystem))
 	l, err := libvirt.ConnectToURI(uri)
 	if err != nil {
@@ -97,7 +130,7 @@ func main() {
 
 	defer l.Disconnect()
 
-	domain, err := l.DomainLookupByName(os.Args[1])
+	domain, err := l.DomainLookupByName(*vmName)
 	if err != nil {
 		log.Fatalf("failed to lookup domain: %v", err)
 	}
@@ -138,7 +171,6 @@ func main() {
 	// Handle other args
 	for len(args) > 0 {
 		// Use SDL audio instead of SPICE
-		// TODO: Should we use PulseAudio or something instead? SDL seems to be unrecommended by QEMU devs.
 		if args[0] == "-audiodev" {
 			newArgs = append(newArgs, args[0])
 			args = args[1:]
@@ -150,10 +182,14 @@ func main() {
 			}
 
 			if audiodev["driver"] == "spice" {
-				// TODO: fix this for use without sudo -E
-				// TODO: fix SDL audio for non-root operation by libvirt-qemu user
-				//audiodev["driver"] = "sdl"
-				audiodev["driver"] = "none"
+				if *runAsRoot {
+					// TODO: Should we use PulseAudio or something instead? SDL seems to be unrecommended by QEMU devs.
+					audiodev["driver"] = "sdl"
+				} else {
+					// TODO: See if we can prevent users besides QEMU and main user from accessing PulseAudio socket
+					audiodev["driver"] = "pa"
+					audiodev["server"] = "unix:/tmp/pulse-socket"
+				}
 			}
 
 			serialized, err := json.Marshal(audiodev)
@@ -359,8 +395,23 @@ func main() {
 		args = args[1:]
 	}
 
-	for _, arg := range newArgs {
-		log.Println(arg)
+	if *verbose {
+		for _, arg := range newArgs {
+			log.Println(arg)
+		}
+	}
+
+	qemuUid := -1
+	if !*runAsRoot {
+		qemuUser, err := user.Lookup(*qemuUsername)
+		if err != nil {
+			log.Fatalf("failed to lookup qemu user: %v", err)
+		}
+
+		qemuUid, err = strconv.Atoi(qemuUser.Uid)
+		if err != nil {
+			log.Fatalf("failed to parse qemu UID: %v", err)
+		}
 	}
 
 	// Run virtiofsd
@@ -368,24 +419,126 @@ func main() {
 		go runHelperCmd(cmd)
 	}
 
+	// Wait for virtiofsd socket creation
 	for _, sock := range virtiofsdSockets {
 		for {
 			if _, err := os.Stat(sock); errors.Is(err, os.ErrNotExist) {
 				time.Sleep(time.Millisecond)
 				continue
 			} else {
-				// TODO: run chown on the socket
+				if !*runAsRoot {
+					err = os.Chown(virtiofsdDir, qemuUid, -1)
+					if err != nil {
+						log.Fatalf("failed to chown virtiofsd socket dir: %v", err)
+					}
+
+					err = os.Chown(sock, qemuUid, -1)
+					if err != nil {
+						log.Fatalf("failed to chown virtiofsd socket: %v", err)
+					}
+				}
+
 				break
 			}
 		}
 	}
 
-	// TODO: Try sandboxing QEMU (maybe pledge or bubblewrap?) so that it doesn't have full privs of QEMU_USER.
+	var waypipeDir string
+
+	// Launch Waypipe as GUI user
+	if !*runAsRoot && *displayServer == "wayland" {
+		if *verbose {
+			log.Println("Dropping privileges on Wayland...")
+		}
+
+		waypipeDir, err = os.MkdirTemp("", "virt-gtk-waypipe")
+		if err != nil {
+			log.Fatalf("failed to create waypipe socket directory: %v", err)
+		}
+		defer os.RemoveAll(waypipeDir) // clean up
+
+		err = os.MkdirAll(waypipeDir + "/xdg", 0o700)
+		if err != nil {
+			log.Fatalf("failed to create waypipe xdg directory: %v", err)
+		}
+
+		// SUDO_USER is not available from pkexec, but SUDO_UID is
+		guiUidStr := os.Getenv("SUDO_UID")
+		if guiUidStr == "" {
+			log.Fatalf("failed to get GUI UID")
+		}
+
+		guiUser, err := user.LookupId(guiUidStr)
+		if err != nil {
+			log.Fatalf("failed to lookup GUI user: %v", err)
+		}
+
+		guiUid, err := strconv.Atoi(guiUidStr)
+		if err != nil {
+			log.Fatalf("failed to parse GUI UID: %v", err)
+		}
+
+		err = os.Chown(waypipeDir, guiUid, -1)
+		if err != nil {
+			log.Fatalf("failed to chown Waypipe socket directory: %v", err)
+		}
+
+		cmdWaypipe := exec.Command("sudo", "-u", guiUser.Username, "-E", "waypipe", "-s", waypipeDir + "/sock", "client")
+
+		go runHelperCmd(cmdWaypipe)
+		defer killHelperCmd(cmdWaypipe)
+
+		// Wait for Waypipe socket creation
+		for {
+			if _, err := os.Stat(waypipeDir + "/sock"); errors.Is(err, os.ErrNotExist) {
+				time.Sleep(time.Millisecond)
+				continue
+			} else {
+				break
+			}
+		}
+
+		err = os.Chown(waypipeDir, qemuUid, -1)
+		if err != nil {
+			log.Fatalf("failed to chown Waypipe socket directory: %v", err)
+		}
+
+		err = os.Chown(waypipeDir + "/xdg", qemuUid, -1)
+		if err != nil {
+			log.Fatalf("failed to chown Waypipe xdg directory: %v", err)
+		}
+
+		err = os.Chown(waypipeDir + "/sock", qemuUid, -1)
+		if err != nil {
+			log.Fatalf("failed to chown Waypipe socket: %v", err)
+		}
+	}
+
+	// TODO: Try sandboxing QEMU (maybe pledge or bubblewrap?) so that it doesn't have full privs of qemuUsername.
+	// Actually based on "ps -aux | grep waypipe" it looks like QEMU may already be using bubblewrap internally...? Need to look into this.
 
 	cmdQemu := exec.Command(qemuExe, newArgs...)
+
+	// Launch Qemu via Waypipe
+	if !*runAsRoot && *displayServer == "wayland" {
+		waypipeArgs := []string{"-u", *qemuUsername, "XDG_RUNTIME_DIR=" + waypipeDir + "/xdg", "waypipe", "-s", waypipeDir + "/sock", "server", "--", qemuExe}
+		waypipeArgs = append(waypipeArgs, newArgs...)
+
+		cmdQemu = exec.Command("sudo", waypipeArgs...)
+	}
+
+	if *displayServer == "x11" {
+		cmdQemu.Env = append(os.Environ(),
+			"GDK_BACKEND=x11",
+		)
+	}
+
 	var qemuOut strings.Builder
 	cmdQemu.Stderr = &qemuOut
 	err = cmdQemu.Run()
+	if *verbose {
+		log.Printf("Qemu returned %v, %s", err, qemuOut.String())
+	}
 	if err != nil {
 		log.Fatalf("failed to run Qemu: %v, %s", err, qemuOut.String())
 	}

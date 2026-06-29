@@ -16,17 +16,6 @@
 // along with virt-gtk.  If not, see
 // <https://www.gnu.org/licenses/>.
 
-// Packagers should run:
-// sudo adduser libvirt-qemu audio
-// sudo adduser libvirt-qemu netdev
-
-// You also need to set a capability on the QEMU bridge helper if network
-// support is needed, like this:
-// sudo setcap 'cap_net_admin+eip' /usr/lib/qemu/qemu-bridge-helper
-// Do not enable the setuid attribute on that helper like the QEMU docs say
-// here: https://wiki.qemu.org/Features/HelperNetworking#Setup
-// setcap works fine and has less attack surface.
-
 package main
 
 import (
@@ -184,10 +173,14 @@ func main() {
 			log.Fatalf("failed to create launcher file: %v", err)
 		}
 
+		// https://specifications.freedesktop.org/desktop-entry/latest/
 		fmt.Fprintln(f, "[Desktop Entry]")
 		fmt.Fprintln(f, "Comment=Virtual Machine")
-		fmt.Fprintf(f, "Exec=sh -c \"pkexec env DISPLAY=\\$DISPLAY XAUTHORITY=\\$XAUTHORITY virt-gtk %s\"\n", d.Name) // TODO: clean this up once virt-gtk main executable is ported to Go
+		// sh is needed to set environment variables in pkexec
+		// pkexec is needed to show GUI sudo prompt
+		fmt.Fprintf(f, "Exec=sh -c \"pkexec --keep-cwd env \\\\\"WAYLAND_DISPLAY=\\\\$XDG_RUNTIME_DIR/\\\\$WAYLAND_DISPLAY\\\\\" XDG_RUNTIME_DIR=/run/user/0 virt-gtk -vm %s\"\n", d.Name)
 		//fmt.Fprintln(f, "TryExec=virt-gtk") // TODO: test and enable this
+		fmt.Fprintln(f, "Path=/tmp/") // workaround for waypipe trying to "stat ." and hitting a permission error
 		fmt.Fprintln(f, "Icon=qemu")
 		fmt.Fprintln(f, "MimeType=")
 		fmt.Fprintf(f, "Name=%s\n", d.Name)
@@ -203,9 +196,12 @@ func main() {
 		}
 
 		cmd := exec.Command("desktop-file-install", "--dir=/usr/local/share/applications/virt-gtk", filePath)
+		var out strings.Builder
+		cmd.Stdout = &out
+		cmd.Stderr = &out
 		err = cmd.Run()
 		if err != nil {
-			log.Fatalf("failed to install launcher file: %v", err)
+			log.Fatalf("failed to install launcher file: %v, %s", err, out.String())
 		}
 	}
 
