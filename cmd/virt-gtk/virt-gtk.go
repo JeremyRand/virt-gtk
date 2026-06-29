@@ -182,14 +182,14 @@ func main() {
 			}
 
 			if audiodev["driver"] == "spice" {
-				if *runAsRoot {
-					// TODO: Should we use PulseAudio or something instead? SDL seems to be unrecommended by QEMU devs.
-					audiodev["driver"] = "sdl"
-				} else {
-					// TODO: See if we can prevent users besides QEMU and main user from accessing PulseAudio socket
-					audiodev["driver"] = "pa"
-					audiodev["server"] = "unix:/tmp/pulse-socket"
+				audiodev["driver"] = "sdl"
+				// These settings might mitigate clipping?
+				inOut := map[string]any{
+					"frequency": 48000,
+					"format": "f32",
 				}
+				audiodev["in"] = inOut
+				audiodev["out"] = inOut
 			}
 
 			serialized, err := json.Marshal(audiodev)
@@ -521,7 +521,8 @@ func main() {
 
 	// Launch Qemu via Waypipe
 	if !*runAsRoot && *displayServer == "wayland" {
-		waypipeArgs := []string{"-u", *qemuUsername, "XDG_RUNTIME_DIR=" + waypipeDir + "/xdg", "waypipe", "-s", waypipeDir + "/sock", "server", "--", qemuExe}
+		// TODO: See if we can prevent users besides QEMU and main user from accessing PulseAudio socket
+		waypipeArgs := []string{"-u", *qemuUsername, "XDG_RUNTIME_DIR=" + waypipeDir + "/xdg", "PULSE_SERVER=unix:/tmp/pulse-socket", "waypipe", "-s", waypipeDir + "/sock", "server", "--", qemuExe}
 		waypipeArgs = append(waypipeArgs, newArgs...)
 
 		cmdQemu = exec.Command("sudo", waypipeArgs...)
