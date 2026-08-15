@@ -55,7 +55,13 @@ var (
 	verbose = flag.Bool("verbose", false, "verbose output")
 )
 
-func fsPaths(xmlDesc string) []string {
+type fsPath struct {
+	dir      string
+	readOnly bool
+	caching  string
+}
+
+func fsPaths(xmlDesc string) []fsPath {
 	type Driver struct {
 		DType string `xml:"type,attr"`
 	}
@@ -64,9 +70,19 @@ func fsPaths(xmlDesc string) []string {
 		Dir string `xml:"dir,attr"`
 	}
 
+	type ReadOnly struct {
+	}
+
+	// Example XML: https://libvirt.org/kbase/virtiofs.html#id4
+	type Cache struct {
+		Mode string `xml:"mode,attr"`
+	}
+
 	type Filesystem struct {
 		Driver Driver `xml:"driver"`
 		Source Source `xml:"source"`
+		ReadOnly *ReadOnly `xml:"readonly"`
+		Cache Cache `xml:"binary>cache"`
 	}
 
 	type Result struct {
@@ -81,11 +97,21 @@ func fsPaths(xmlDesc string) []string {
 		log.Fatalf("failed to parse filesystems from XML: %v", err)
 	}
 
-	paths := []string{}
+	paths := []fsPath{}
 
 	for _, fs := range result.Filesystems {
 		if fs.Driver.DType == "virtiofs" {
-			paths = append(paths, fs.Source.Dir)
+			path := fsPath{
+				dir:      fs.Source.Dir,
+				readOnly: fs.ReadOnly != nil,
+				caching:  fs.Cache.Mode,
+			}
+
+			if path.caching == "" {
+				path.caching = "auto"
+			}
+
+			paths = append(paths, path)
 		}
 	}
 
@@ -94,6 +120,7 @@ func fsPaths(xmlDesc string) []string {
 
 func runHelperCmd(cmd *exec.Cmd) {
 	var out strings.Builder
+	cmd.Stdout = &out
 	cmd.Stderr = &out
 
 	err := cmd.Run()
@@ -104,6 +131,7 @@ func runHelperCmd(cmd *exec.Cmd) {
 
 func killHelperCmd(cmd *exec.Cmd) {
 	var out strings.Builder
+	cmd.Stdout = &out
 	cmd.Stderr = &out
 
 	err := cmd.Process.Kill()
@@ -238,7 +266,17 @@ func main() {
 
 				socketPath := filepath.Join(virtiofsdDir, "fs" + fsName + "-fs.sock")
 				virtiofsdSockets = append(virtiofsdSockets, socketPath)
-				virtiofsdCmds = append(virtiofsdCmds, exec.Command("/usr/lib/qemu/virtiofsd", "--socket-path=" + socketPath, "-o", "source=" + path, "-o", "cache=always"))
+
+				if *verbose {
+					log.Printf("virtiofs: %s, cache %s, readonly %v", path.dir, path.caching, path.readOnly)
+				}
+
+				args := []string{"--socket-path", socketPath, "--shared-dir", path.dir, "--cache", path.caching}
+				if path.readOnly {
+					args = append(args, "--readonly")
+				}
+
+				virtiofsdCmds = append(virtiofsdCmds, exec.Command("/usr/lib/qemu/virtiofsd", args...))
 
 				newOpts := []string{}
 				for _, opt := range opts {
@@ -427,6 +465,7 @@ func main() {
 				continue
 			} else {
 				if !*runAsRoot {
+					// TODO: Try using --socket-group option in virtiofsd command instead of manually doing chown?
 					err = os.Chown(virtiofsdDir, qemuUid, -1)
 					if err != nil {
 						log.Fatalf("failed to chown virtiofsd socket dir: %v", err)
@@ -535,6 +574,7 @@ func main() {
 	}
 
 	var qemuOut strings.Builder
+	cmdQemu.Stdout = &qemuOut
 	cmdQemu.Stderr = &qemuOut
 	err = cmdQemu.Run()
 	if *verbose {
