@@ -388,7 +388,6 @@ func main() {
 			continue
 		}
 
-		// Remove AES key
 		if args[0] == "-object" {
 			object := map[string]any{}
 			err = json.Unmarshal([]byte(args[1]), &object)
@@ -396,6 +395,13 @@ func main() {
 				log.Fatalf("failed to parse object: %v", err)
 			}
 
+			// Remove monitor
+			if object["qom-type"] == "monitor-qmp" {
+				args = args[2:]
+				continue
+			}
+
+			// Remove AES key
 			if object["qom-type"] == "secret" {
 				args = args[2:]
 				continue
