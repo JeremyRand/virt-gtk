@@ -49,8 +49,8 @@ import (
 
 var (
 	displayServer = flag.String("display-server", "wayland", "x11 or wayland")
-	runAsRoot = flag.Bool("root", false, "run as root")
-	qemuUsername = flag.String("qemu-user", "libvirt-qemu", "user to run Qemu as (if not root)")
+	runAsRoot = flag.Bool("root", false, "run QEMU as root")
+	qemuUsername = flag.String("qemu-user", "libvirt-qemu", "user to run QEMU as (if not root)")
 	vmName = flag.String("vm", "", "name of VM to launch")
 	verbose = flag.Bool("verbose", false, "verbose output")
 )
